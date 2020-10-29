@@ -16,6 +16,10 @@
 
 __all__ = ("Client", "CompletionStrategy")
 
+from uuid import uuid4
+
+from .message._envelope import FogEnvelope
+from .message._raw_message import RawMessage
 from .._configuration.configuration import cc_conf, initConnectorConf
 from .._util import Singleton, validateInstance, calcDuration
 from ..logger._logger import getLogger, initLogging
@@ -42,7 +46,8 @@ logger = getLogger(__name__.rsplit(".", 1)[-1].replace("_", ""))
 
 handler_map = {
     CommandEnvelope: "response",
-    EventEnvelope: "event"
+    EventEnvelope: "event",
+    FogEnvelope: "fog"
 }
 
 
@@ -65,8 +70,11 @@ class Client(metaclass=Singleton):
         initLogging()
         logger.info(20 * "-" + " client-connector-lib v{} ".format(VERSION) + 20 * "-")
         self.__genDeviceIdPrefix()
+        host = cc_conf.auth.host
+        if cc_conf.auth.port is not None:
+            host += ":" + str(cc_conf.auth.port)
         self.__auth = OpenIdClient(
-            "{}://{}/{}".format(http.tls_map[cc_conf.auth.tls], cc_conf.auth.host, cc_conf.auth.path),
+            "{}://{}/{}".format(http.tls_map[cc_conf.auth.tls], host, cc_conf.auth.path),
             cc_conf.credentials.user,
             cc_conf.credentials.pw,
             cc_conf.auth.id
@@ -76,6 +84,7 @@ class Client(metaclass=Singleton):
         self.__connect_lock = threading.Lock()
         self.__reconnect_flag = False
         self.__cmd_queue = queue.Queue()
+        self.__fog_queue = queue.Queue()
         self.__workers = list()
         self.__hub_sync_event = threading.Event()
         self.__hub_sync_event.set()
@@ -105,6 +114,9 @@ class Client(metaclass=Singleton):
         try:
             logger.info("initializing hub ...")
             access_token = self.__auth.getAccessToken()
+            host = cc_conf.api.host
+            if cc_conf.api.port is not None:
+                host += ":" + str(cc_conf.api.port)
             if not cc_conf.hub.id:
                 logger.info("creating new hub ...")
                 hub_name = cc_conf.hub.name
@@ -112,7 +124,7 @@ class Client(metaclass=Singleton):
                     logger.info("generating hub name ...")
                     hub_name = "{}-{}".format(getpass.getuser(), datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"))
                 req = http.Request(
-                    url="{}://{}/{}".format(http.tls_map[cc_conf.api.tls], cc_conf.api.host, cc_conf.api.hub_endpt),
+                    url="{}://{}/{}".format(http.tls_map[cc_conf.api.tls], host, cc_conf.api.hub_endpt),
                     method=http.Method.POST,
                     body={
                         "id": None,
@@ -140,7 +152,7 @@ class Client(metaclass=Singleton):
                 req = http.Request(
                     url="{}://{}/{}/{}".format(
                         http.tls_map[cc_conf.api.tls],
-                        cc_conf.api.host,
+                        host,
                         cc_conf.api.hub_endpt,
                         http.urlEncode(cc_conf.hub.id)
                     ),
@@ -194,10 +206,13 @@ class Client(metaclass=Singleton):
                 logger.debug("devices {}".format(device_ids))
                 logger.debug("hash '{}'".format(devices_hash))
                 access_token = self.__auth.getAccessToken()
+                host = cc_conf.api.host
+                if cc_conf.api.port is not None:
+                    host += ":" + str(cc_conf.api.port)
                 req = http.Request(
                     url="{}://{}/{}/{}".format(
                         http.tls_map[cc_conf.api.tls],
-                        cc_conf.api.host,
+                        host,
                         cc_conf.api.hub_endpt,
                         http.urlEncode(cc_conf.hub.id)
                     ),
@@ -224,7 +239,7 @@ class Client(metaclass=Singleton):
                         req = http.Request(
                             url="{}://{}/{}/{}".format(
                                 http.tls_map[cc_conf.api.tls],
-                                cc_conf.api.host,
+                                host,
                                 cc_conf.api.hub_endpt,
                                 http.urlEncode(cc_conf.hub.id)
                             ),
@@ -289,10 +304,13 @@ class Client(metaclass=Singleton):
         try:
             logger.info("adding device '{}' to platform ...".format(device.id))
             access_token = self.__auth.getAccessToken()
+            host = cc_conf.api.host
+            if cc_conf.api.port is not None:
+                host += ":" + str(cc_conf.api.port)
             req = http.Request(
                 url="{}://{}/{}/{}-{}".format(
                     http.tls_map[cc_conf.api.tls],
-                    cc_conf.api.host,
+                    host,
                     cc_conf.api.device_endpt,
                     cc_conf.device.id_prefix,
                     http.urlEncode(device.id)
@@ -304,7 +322,7 @@ class Client(metaclass=Singleton):
             resp = req.send()
             if resp.status == 404:
                 req = http.Request(
-                    url="{}://{}/{}".format(http.tls_map[cc_conf.api.tls], cc_conf.api.host, cc_conf.api.device_endpt),
+                    url="{}://{}/{}".format(http.tls_map[cc_conf.api.tls], host, cc_conf.api.device_endpt),
                     method=http.Method.POST,
                     body={
                         "name": device.name,
@@ -358,10 +376,13 @@ class Client(metaclass=Singleton):
         try:
             logger.info("deleting device '{}' from platform ...".format(device_id))
             access_token = self.__auth.getAccessToken()
+            host = cc_conf.api.host
+            if cc_conf.api.port is not None:
+                host += ":" + str(cc_conf.api.port)
             req = http.Request(
                 url="{}://{}/{}/{}-{}".format(
                     http.tls_map[cc_conf.api.tls],
-                    cc_conf.api.host,
+                    host,
                     cc_conf.api.device_endpt,
                     cc_conf.device.id_prefix,
                     http.urlEncode(device_id)
@@ -393,10 +414,13 @@ class Client(metaclass=Singleton):
         try:
             logger.info("updating device '{}' on platform ...".format(device.id))
             access_token = self.__auth.getAccessToken()
+            host = cc_conf.api.host
+            if cc_conf.api.port is not None:
+                host += ":" + str(cc_conf.api.port)
             req = http.Request(
                 url="{}://{}/{}/{}-{}".format(
                     http.tls_map[cc_conf.api.tls],
-                    cc_conf.api.host,
+                    host,
                     cc_conf.api.device_endpt,
                     cc_conf.device.id_prefix,
                     http.urlEncode(device.id)
@@ -483,6 +507,9 @@ class Client(metaclass=Singleton):
         else:
             if not cc_conf.connector.tls:
                 logger.warning("TLS encryption disabled")
+            fogTopic = None
+            if cc_conf.connector.enable_fog is True:
+                fogTopic = handler_map[FogEnvelope] + '/control'
             self.__comm = mqtt.Client(
                 client_id=cc_conf.hub.id if self.__hub_init else hashlib.md5(
                     bytes(cc_conf.credentials.user, "UTF-8")
@@ -490,11 +517,12 @@ class Client(metaclass=Singleton):
                 msg_retry=cc_conf.connector.msg_retry,
                 keepalive=cc_conf.connector.keepalive,
                 loop_time=cc_conf.connector.loop_time,
-                tls=cc_conf.connector.tls
+                tls=cc_conf.connector.tls,
+                fogTopic=fogTopic
             )
             self.__comm.on_connect = self.__onConnect
             self.__comm.on_disconnect = self.__onDisconnect
-            self.__comm.on_message = self.__handleCommand
+            self.__comm.on_message = self.__handleMessage
         def on_done():
             if event_worker.exception:
                 try:
@@ -608,24 +636,33 @@ class Client(metaclass=Singleton):
             logger.error("disconnecting device '{}' from platform failed - {}".format(device_id, ex))
             raise DeviceDisconnectError
 
-    def __handleCommand(self, envelope: typing.Union[str, bytes], uri: typing.Union[str, bytes]) -> None:
-        logger.debug("received command ...\nservice uri: '{}'\ncommand: '{}'".format(uri, envelope))
+    def __handleMessage(self, envelope: typing.Union[str, bytes], uri: typing.Union[str, bytes]) -> None:
         try:
-            uri = uri.split("/")
+            uri_parts = uri.split("/")
             envelope = json.loads(envelope)
-            self.__cmd_queue.put_nowait(
-                CommandEnvelope(
-                    device=__class__.__parseDeviceID(uri[1]),
-                    service=uri[2],
-                    message=Message(
-                        data=envelope["payload"].setdefault("data", str()),
-                        metadata=envelope["payload"].setdefault("metadata", str())
-                    ),
-                    corr_id=envelope["correlation_id"],
-                    completion_strategy=envelope["completion_strategy"],
-                    timestamp=envelope["timestamp"]
+            if uri_parts[0] == handler_map[FogEnvelope]:
+                logger.debug("received fog message\nservice uri: '{}'\ncommand: '{}'".format(uri, envelope))
+                self.__fog_queue.put_nowait(
+                    RawMessage(
+                        topic=uri,
+                        payload=envelope
+                ))
+                logger.debug("Put fog message in fog_queue")
+            else:
+                logger.debug("received command ...\nservice uri: '{}'\ncommand: '{}'".format(uri, envelope))
+                self.__cmd_queue.put_nowait(
+                    CommandEnvelope(
+                        device=__class__.__parseDeviceID(uri_parts[1]),
+                        service=uri_parts[2],
+                        message=Message(
+                            data=envelope["payload"].setdefault("data", str()),
+                            metadata=envelope["payload"].setdefault("metadata", str())
+                        ),
+                        corr_id=envelope["correlation_id"],
+                        completion_strategy=envelope["completion_strategy"],
+                        timestamp=envelope["timestamp"]
+                    )
                 )
-            )
         except json.JSONDecodeError as ex:
             logger.error("could not parse command - '{}'\nservice uri: '{}'\ncommand: '{}'".format(ex, uri, envelope))
         except (KeyError, AttributeError) as ex:
@@ -640,8 +677,11 @@ class Client(metaclass=Singleton):
                 )
             )
 
-    def __send(self, envelope: typing.Union[CommandEnvelope, EventEnvelope], event_worker):
-        logger.debug("sending {} '{}' to platform ...".format(handler_map[type(envelope)], envelope.correlation_id))
+    def __send(self, envelope: typing.Union[CommandEnvelope, EventEnvelope, FogEnvelope], event_worker):
+        if isinstance(envelope, FogEnvelope):
+            logger.debug("sending {} '{}' to platform ...".format(handler_map[type(envelope)], envelope.service_uri))
+        else:
+            logger.debug("sending {} '{}' to platform ...".format(handler_map[type(envelope)], envelope.correlation_id))
         if not self.__connected_flag:
             logger.error(
                 "sending {} '{}' to platform failed - not connected".format(
@@ -676,11 +716,23 @@ class Client(metaclass=Singleton):
                         )
                     )
             event_worker.usr_method = on_done
-            self.__comm.publish(
+            if isinstance(envelope, FogEnvelope):
+                topic = "{}/{}/{}".format(
+                    handler_map[type(envelope)], envelope.device_id, envelope.service_uri
+                )
+            else:
                 topic="{}/{}/{}".format(
                     handler_map[type(envelope)], __class__.__prefixDeviceID(envelope.device_id), envelope.service_uri
-                ),
-                payload=json.dumps(dict(envelope.message)) if isinstance(envelope, EventEnvelope) else json.dumps(dict(envelope)),
+                )
+            if isinstance(envelope, EventEnvelope):
+                payload = json.dumps(dict(envelope.message))
+            elif isinstance(envelope, FogEnvelope):
+                payload = envelope.message.data
+            else:
+                payload = json.dumps(dict(envelope))
+            self.__comm.publish(
+                topic=topic,
+                payload=payload,
                 qos=mqtt.qos_map.setdefault(cc_conf.connector.qos, 1),
                 event_worker=event_worker
             )
@@ -965,6 +1017,45 @@ class Client(metaclass=Singleton):
             target=self.__send,
             args=(envelope, ),
             name="send-event-".format(envelope.correlation_id)
+        )
+        future = worker.start()
+        if asynchronous:
+            return future
+        else:
+            future.wait()
+            future.result()
+
+    def receiveFogMessage(self, block: bool = True, timeout: typing.Optional[typing.Union[int, float]] = None) -> RawMessage:
+        """
+        Receive a fog message.
+        :param block: If 'True' blocks until a command is available.
+        :param timeout: Return after set amount of time if no command is available.
+        :return: Envelope object.
+        """
+        if not cc_conf.connector.enable_fog:
+            raise
+        validateInstance(block, bool)
+        validateInstance(timeout, (int, float, type(None)))
+        try:
+            return self.__fog_queue.get(block=block, timeout=timeout)
+        except queue.Empty:
+            raise CommandQueueEmptyError
+
+    def emmitFogMessage(self, operatorName: str, message: str, asynchronous: bool = False) -> typing.Optional[Future]:
+        """
+        Send an event to the platform.
+        :param operatorName: Name of the operator.
+        :param message: Message of the operator.
+        :param asynchronous: If 'True' method returns a ClientFuture object.
+        :return: Future or None.
+        """
+        validateInstance(operatorName, str)
+        validateInstance(message, str)
+        validateInstance(asynchronous, bool)
+        worker = EventWorker(
+            target=self.__send,
+            args=(FogEnvelope(operatorName, message), ),
+            name="send-fog-" + operatorName + '-' + str(uuid4())
         )
         future = worker.start()
         if asynchronous:

@@ -26,6 +26,7 @@ __all__ = (
     'qos_map'
 )
 
+from ...._configuration.configuration import cc_conf
 from ....logger import getLogger
 import paho.mqtt.client
 import threading
@@ -72,7 +73,7 @@ class PublishError(MqttClientError):
 
 
 class Client:
-    def __init__(self, client_id: str, msg_retry: int, keepalive: int, loop_time: float, tls: bool):
+    def __init__(self, client_id: str, msg_retry: int, keepalive: int, loop_time: float, tls: bool, fogTopic: str = None):
         if not loop_time > 0.0:
             raise MqttClientError("loop time must be larger than 0")
         if keepalive <= loop_time:
@@ -86,6 +87,7 @@ class Client:
         self.__events = dict()
         self.__loop_thread = None
         self.__usr_disconn = False
+        self.__fogTopic = fogTopic
         self.__mqtt = paho.mqtt.client.Client(client_id=client_id, clean_session=True)
         self.__setup_mqtt()
         self.on_connect = None
@@ -126,6 +128,17 @@ class Client:
         try:
             rc = self.__mqtt.connect(host=host, port=port, keepalive=self.__keepalive)
             if rc == paho.mqtt.client.MQTT_ERR_SUCCESS:
+                if self.__fogTopic is not None:
+                    logger.info("subscribing to fog topic '" + self.__fogTopic + "' because enable_fog is set")
+                    res = self.__mqtt.subscribe(self.__fogTopic, qos_map[cc_conf.connector.qos])
+                    if res[0] is paho.mqtt.client.MQTT_ERR_SUCCESS:
+                        logger.debug("request subscribe for '{}'".format(self.__fogTopic))
+                    elif res[0] == paho.mqtt.client.MQTT_ERR_NO_CONN:
+                        logger.error("Could not subscribe to fog topic: Not Connected")
+                        raise NotConnectedError
+                    else:
+                        logger.error("Could not subscribe to fog topic: " + paho.mqtt.client.error_string(res[0]).replace(".", "").lower())
+                        raise SubscribeError(paho.mqtt.client.error_string(res[0]).replace(".", "").lower())
                 logger.debug("starting loop")
                 loop_ex = None
                 try:

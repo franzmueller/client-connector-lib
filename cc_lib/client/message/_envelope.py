@@ -118,3 +118,8 @@ class EventEnvelope(Envelope):
 
     def __init__(self, device: typing.Union[Device, str], service: str, message: Message):
         super().__init__(device, service, message)
+
+class FogEnvelope(Envelope):
+
+    def __init__(self, operatorName: str, message: str):
+        super().__init__("analytics", "analytics-" + operatorName, Message(message))

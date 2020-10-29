@@ -46,10 +46,12 @@ class ConnectorConf:
         reconn_delay_min: int = 5
         reconn_delay_max: int = 120
         reconn_delay_factor: typing.Union[int, float] = 1.85
+        enable_fog = False
 
     @section
     class auth:
         host: str = None
+        port: int = None
         path: str = None
         tls: bool = True
         id: str = None
@@ -74,6 +76,7 @@ class ConnectorConf:
     @section
     class api:
         host: str = None
+        port: int = None
         hub_endpt: str = None
         device_endpt: str = None
         tls: bool = True
